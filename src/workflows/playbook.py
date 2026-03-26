@@ -270,21 +270,68 @@ class PlaybookWorkflow(BaseWorkflow):
     def get_graph(self):
         """Build and return the compiled LangGraph StateGraph.
 
-        Creates a linear graph with all 10 steps. In production,
-        this would include conditional edges for branching.
+        Creates a graph with conditional edges for branching based on context.
+        Uses create_router for step routing decisions.
         """
         from langgraph.graph import StateGraph, START, END
 
+        # Import the router function from engine
+        from src.core.engine import create_router
+
         graph = StateGraph(WorkflowState)
+
+        # Get step names for routing
+        step_names = [step.name for step in self._step_defs]
+
+        # Define custom routing rules for branching
+        routing_rules = {
+            "check_demand": self._route_after_demand_check,
+            "build_minimum": self._route_after_build,
+        }
+
+        # Create router with custom rules
+        router = create_router(step_names, routing_rules)
 
         # Add all steps as nodes
         for step in self._step_defs:
             graph.add_node(step.name, step.handler_fn)
 
-        # Connect steps in sequence
+        # Connect START to first step
         graph.add_edge(START, "pick_niche")
-        for i in range(len(self._step_defs) - 1):
-            graph.add_edge(self._step_defs[i].name, self._step_defs[i + 1].name)
-        graph.add_edge(self._step_defs[-1].name, END)
+
+        # Add conditional edges for each step
+        for step in self._step_defs:
+            if step.is_checkpoint:
+                # Checkpoint steps still use conditional routing but can pause
+                graph.add_conditional_edges(step.name, router)
+            else:
+                # Non-checkpoint steps use conditional routing
+                graph.add_conditional_edges(step.name, router)
 
         return graph.compile()
+
+    def _route_after_demand_check(self, state: WorkflowState) -> str:
+        """Route after checking demand - branch based on demand score.
+
+        If demand is low (score < 5), route back to pick_niche to try a new niche.
+        If demand is sufficient, proceed to decide_angle.
+        """
+        demand_result = state.get("step_results", {}).get("check_demand", {})
+        demand_score = demand_result.get("data", {}).get("demand_score", 0)
+
+        if demand_score < 5:
+            return "pick_niche"  # Retry with different niche
+        return "decide_angle"
+
+    def _route_after_build(self, state: WorkflowState) -> str:
+        """Route after building minimum - branch based on quality check.
+
+        If quality check fails, route back to build_minimum to retry.
+        If quality passes, proceed to make_credible.
+        """
+        build_result = state.get("step_results", {}).get("build_minimum", {})
+        quality = build_result.get("quality_check", "pending")
+
+        if quality == "failed":
+            return "build_minimum"  # Retry
+        return "make_credible"
