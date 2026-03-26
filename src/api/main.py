@@ -11,12 +11,14 @@ Per D-05: CLI first + Web Dashboard - this module provides the web API.
 """
 
 import logging
+import os
 import uuid
 from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from openai import AsyncOpenAI
 
 from src.api.models import (
     ExecutionListResponse,
@@ -35,6 +37,9 @@ logger = logging.getLogger(__name__)
 # Global engine instance - initialized on startup
 _engine: Optional[WorkflowEngine] = None
 
+# Global OpenAI client - initialized on startup
+_openai_client: Optional[AsyncOpenAI] = None
+
 
 def get_engine() -> WorkflowEngine:
     """Get or create the global workflow engine.
@@ -47,6 +52,27 @@ def get_engine() -> WorkflowEngine:
         workflow = PlaybookWorkflow()
         _engine = create_engine(workflow)
     return _engine
+
+
+def get_openai_client() -> AsyncOpenAI:
+    """Get or create the global OpenAI client.
+
+    Returns:
+        Configured AsyncOpenAI client instance.
+
+    Raises:
+        HTTPException: If OPENAI_API_KEY is not set.
+    """
+    global _openai_client
+    if _openai_client is None:
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise HTTPException(
+                status_code=503,
+                detail="OpenAI API key not configured. Set OPENAI_API_KEY environment variable.",
+            )
+        _openai_client = AsyncOpenAI(api_key=api_key)
+    return _openai_client
 
 
 @asynccontextmanager
@@ -88,6 +114,16 @@ app.add_middleware(
 from src.api import routes as api_routes
 
 app.include_router(api_routes.router, prefix="/api/v1")
+
+# Register idea generation routes
+from src.api import idea_routes as idea_api_routes
+
+app.include_router(idea_api_routes.router, prefix="/api")
+
+# Register product generation routes
+from src.api import product_routes as product_api_routes
+
+app.include_router(product_api_routes.router, prefix="/api")
 
 
 @app.get("/health")
