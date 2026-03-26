@@ -25,6 +25,10 @@ created: 2026-03-26
 
 **Note:** This is a Python project (FastAPI + CLI) with a planned web dashboard for human review and approval. The design system will be initialized when the React frontend is created. This contract defines requirements for that future frontend.
 
+**Focal point:** Idea cards (primary content area) — users need to easily compare and select from generated product ideas.
+
+**Manual design system:** CSS variables defined in this spec (spacing, typography, color) will serve as the design system until shadcn is initialized.
+
 ---
 
 ## Spacing Scale
@@ -50,7 +54,7 @@ Exceptions: none — use standard 8-point grid
 | Role | Size | Weight | Line Height |
 |------|------|--------|-------------|
 | Body | 16px | 400 (regular) | 1.5 |
-| Label | 14px | 500 (medium) | 1.4 |
+| Label | 14px | 400 (regular) | 1.4 |
 | Heading | 20px | 600 (semibold) | 1.3 |
 | Display | 28px | 600 (semibold) | 1.2 |
 
