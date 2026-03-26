@@ -125,6 +125,11 @@ from src.api import product_routes as product_api_routes
 
 app.include_router(product_api_routes.router, prefix="/api")
 
+# Register review workflow routes
+from src.api import review_routes as review_api_routes
+
+app.include_router(review_api_routes.router, prefix="/api")
+
 
 @app.get("/health")
 async def health_check() -> dict:
