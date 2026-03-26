@@ -1,18 +1,80 @@
-"""LangGraph workflow engine with checkpoint persistence.
+"""LangGraph workflow engine with checkpoint persistence and retry logic.
 
 This module provides the WorkflowEngine class that compiles and executes
 workflows using LangGraph's StateGraph with SQLite-based checkpoint persistence.
+Includes retry logic with exponential backoff per D-04.
 """
 
+import logging
 import uuid
 from typing import Any, Callable, Optional
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import StateGraph, START, END
+from langgraph.types import RetryPolicy
 
 from src.core.checkpoint import create_checkpointer
 from src.core.state import WorkflowState
 from src.workflows.base import BaseWorkflow
+from src.utils.errors import (
+    StepError,
+    RetryExhaustedError,
+    TransientError,
+    PermanentError,
+    classify_error,
+    ErrorType,
+)
+
+logger = logging.getLogger(__name__)
+
+
+# Default retry policy per D-04: 3 retries with exponential backoff
+DEFAULT_RETRY_POLICY = RetryPolicy(
+    initial_interval=1.0,
+    backoff_factor=2.0,
+    max_interval=30.0,
+    max_attempts=3,
+    jitter=True,
+)
+
+
+def error_handler(state: WorkflowState) -> WorkflowState:
+    """Error handler node that catches failures, logs to state, and decides next action.
+
+    Per D-04: This node is called when a step fails after all retries are exhausted.
+    It logs the failure to state.errors, determines whether to abort or continue,
+    and logs for debugging.
+
+    Args:
+        state: Current workflow state containing the error information.
+
+    Returns:
+        Updated state with error logged and retry decision made.
+    """
+    # Get the current step that failed
+    current_step = state.get("current_step", "unknown")
+
+    # Get any error info from the step results
+    step_result = state.get("step_results", {}).get(current_step, {})
+    error_info = step_result.get("error", "Unknown error")
+
+    # Build error message with context
+    error_msg = f"Step '{current_step}' failed: {error_info}"
+    logger.error(error_msg)
+
+    # Add to state's errors list for accumulation
+    if "errors" not in state:
+        state["errors"] = []
+    state["errors"].append(error_msg)
+
+    # Mark the step as failed
+    state["step_results"][current_step] = {
+        **step_result,
+        "status": "failed",
+        "error": error_info,
+    }
+
+    return state
 
 
 def create_router(
