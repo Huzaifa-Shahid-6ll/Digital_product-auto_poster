@@ -49,8 +49,8 @@
 
 **Plans**: 3 plans
 
-- [ ] 02-01-PLAN.md — Idea generation: schemas, IdeaGenerator with OpenAI, API endpoint
-- [ ] 02-02-PLAN.md — Product generation: PDF generator with ReportLab, quality validator
+- [x] 02-01-PLAN.md — Idea generation: schemas, IdeaGenerator with OpenAI, API endpoint
+- [x] 02-02-PLAN.md — Product generation: PDF generator with ReportLab, quality validator
 - [ ] 02-03-PLAN.md — Review workflow: state machine, API endpoints, human verification checkpoint
 
 ---
@@ -119,7 +119,7 @@
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Core Automation Engine | 4/4 | Complete | 2026-03-26 |
-| 2. Product Generation | 0/3 | Not started | - |
+| 2. Product Generation | 2/3 | In Progress|  |
 | 3. Listing Creation | 0/5 | Not started | - |
 | 4. Research & Validation | 0/4 | Not started | - |
 | 5. Analytics & Measurement | 0/4 | Not started | - |

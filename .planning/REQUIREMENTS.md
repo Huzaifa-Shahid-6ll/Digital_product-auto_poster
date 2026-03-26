@@ -41,8 +41,8 @@
 |-------------|-------|--------|
 | NR-01 | Phase 4 | Pending |
 | NR-02 | Phase 4 | Pending |
-| PG-01 | Phase 2 | Pending |
-| PG-02 | Phase 2 | Pending |
+| PG-01 | Phase 2 | Complete |
+| PG-02 | Phase 2 | Complete |
 | MK-01 | Phase 3 | Pending |
 | MK-02 | Phase 3 | Pending |
 | TG-01 | - | Deferred |
