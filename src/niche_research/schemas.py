@@ -2,14 +2,16 @@
 
 Defines structured data models for:
 - NicheRecommendation: Individual niche recommendation with all details
+- VerifiedNiche: Verified niche with demand scoring
 - NicheAnalysisRequest: Request model for analyzing niches
 - NicheAnalysisResponse: Response model with list of recommendations
+- VerificationResult: Response model for verification endpoint
 
 Used for AI structured output validation and API response formatting.
 """
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -40,6 +42,51 @@ class NicheRecommendation(BaseModel):
     )
     rationale: str = Field(..., description="Why this niche is promising")
     sources: list[str] = Field(default_factory=list, description="Source URLs used for research")
+
+
+class VerifiedNiche(BaseModel):
+    """Verified niche with demand scoring from Google Trends.
+
+    Attributes:
+        recommendation: The original NicheRecommendation.
+        demand_score: Demand score (0-100) calculated using the formula.
+        trend_direction: Direction of search interest trend.
+        verification_data: Raw Google Trends data for source citation.
+        verified_demand: Whether niche meets minimum threshold (50+).
+        user_approved: Whether user has approved this niche.
+    """
+
+    recommendation: NicheRecommendation = Field(..., description="Original niche recommendation")
+    demand_score: float = Field(..., description="Demand score (0-100)")
+    trend_direction: Literal["rising", "stable", "declining"] = Field(
+        ..., description="Trend direction"
+    )
+    verification_data: dict[str, Any] = Field(
+        default_factory=dict, description="Raw Google Trends data"
+    )
+    verified_demand: bool = Field(..., description="Meets minimum threshold (50+)")
+    category: Literal["validated", "explore", "low_demand"] = Field(
+        ..., description="Category based on demand score"
+    )
+    user_approved: bool = Field(default=False, description="User has approved this niche")
+
+
+class VerificationResult(BaseModel):
+    """Response model for verification endpoint.
+
+    Attributes:
+        verified_niches: List of VerifiedNiche objects.
+        summary: Summary counts by category.
+        verified_at: Timestamp when verification was performed.
+    """
+
+    verified_niches: list[VerifiedNiche] = Field(
+        ..., description="List of verified niche recommendations"
+    )
+    summary: dict[str, int] = Field(default_factory=dict, description="Summary counts by category")
+    verified_at: datetime = Field(
+        default_factory=datetime.utcnow, description="Timestamp when verification was performed"
+    )
 
 
 class NicheAnalysisRequest(BaseModel):
