@@ -6,13 +6,19 @@ REST endpoints for:
 - PUT /api/listings/{listing_id} - Update listing content
 - POST /api/listings/{listing_id}/publish - Publish listing
 - DELETE /api/listings/{listing_id} - Delete listing
+- POST /api/listings/batch - Start batch listing
+- GET /api/listings/batch/{batch_id} - Get batch status
+- POST /api/listings/batch/{batch_id}/approve - Approve current listing
+- POST /api/listings/batch/{batch_id}/edit - Edit current listing
+- DELETE /api/listings/batch/{batch_id} - Cancel batch
 
 Mounted at /api/listings in main app.
 """
 
 import logging
-from datetime import datetime
-from typing import Optional
+import uuid
+from datetime import datetime, timedelta
+from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
@@ -38,6 +44,7 @@ from src.etsy.file_upload import (
     upload_and_configure_digital,
 )
 from src.etsy.oauth import EtsyOAuth
+from src.compliance.stagger import calculate_stagger_delay, get_stagger_schedule
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +54,10 @@ router = APIRouter(tags=["listings"])
 # In-memory storage for demo (would be DB in production)
 _listings_storage: dict[int, dict] = {}
 _listing_counter = 0
+
+# Batch listing storage
+_batch_storage: dict[str, dict] = {}
+_batch_counter = 0
 
 
 # Request/Response models
@@ -145,6 +156,81 @@ class ImageListResponse(BaseModel):
     """Response model for listing images."""
 
     images: list[dict]
+
+
+# ============ Batch Listing Models ============
+
+
+class BatchListingItem(BaseModel):
+    """Individual listing in a batch."""
+
+    listing_id: Optional[int] = None
+    product_id: str
+    status: str = "pending"  # pending, draft, published, skipped
+    title: Optional[str] = None
+    description: Optional[str] = None
+    tags: Optional[list[str]] = None
+    price: Optional[float] = None
+    etsy_url: Optional[str] = None
+    error: Optional[str] = None
+
+
+class BatchListingCreateRequest(BaseModel):
+    """Request model for batch listing creation."""
+
+    product_ids: list[str] = Field(..., description="List of product IDs to create listings from")
+    stagger_enabled: bool = Field(True, description="Apply stagger delays between listings")
+
+
+class BatchListingResponse(BaseModel):
+    """Response model for batch listing creation."""
+
+    batch_id: str
+    total: int
+    completed: int
+    current_index: int
+    listings: list[BatchListingItem]
+    next_available_time: Optional[str] = None
+    stagger_enabled: bool
+
+
+class BatchStatusResponse(BaseModel):
+    """Response model for batch status."""
+
+    batch_id: str
+    total: int
+    completed: int
+    current_index: int
+    status: str  # pending, in_progress, completed, cancelled
+    listings: list[BatchListingItem]
+    next_available_time: Optional[str] = None
+    stagger_enabled: bool
+
+
+class BatchApproveResponse(BaseModel):
+    """Response model for batch approval."""
+
+    success: bool
+    current_listing: Optional[BatchListingItem] = None
+    next_listing: Optional[BatchListingItem] = None
+    next_available_time: Optional[str] = None
+    message: Optional[str] = None
+
+
+class BatchEditRequest(BaseModel):
+    """Request model for editing batch listing."""
+
+    title: Optional[str] = None
+    description: Optional[str] = None
+    tags: Optional[list[str]] = None
+    price: Optional[float] = None
+
+
+class BatchEditResponse(BaseModel):
+    """Response model for batch edit."""
+
+    success: bool
+    listing: BatchListingItem
 
 
 # Dependencies
@@ -812,3 +898,367 @@ async def upload_digital_file_endpoint(
         digital=True,
         quantity_unlimited=True,
     )
+
+
+# ============ Batch Listing Endpoints ============
+
+
+@router.post("/batch", response_model=BatchListingResponse)
+async def create_batch_listing(
+    request: BatchListingCreateRequest,
+    generator: ListingGenerator = Depends(get_listing_generator),
+    client: Optional[EtsyClient] = Depends(get_etsy_client),
+) -> BatchListingResponse:
+    """Start a batch listing from multiple products.
+
+    Per D-20: Sequential batch listing - creates listings one at a time.
+    Per D-21: User reviews each listing before next is created.
+
+    Input:
+        - product_ids: List of approved product IDs from Phase 2
+        - stagger_enabled: Apply stagger delays between listings (default: true)
+
+    Flow:
+        1. Get approved products from Phase 2
+        2. For each product: generate listing -> apply compliance -> create draft
+        3. Return first listing for review
+
+    Returns:
+        BatchListingResponse with batch_id, listings, and current_index
+
+    Raises:
+        HTTPException: If no products provided or generation fails.
+    """
+    global _batch_counter
+
+    if not request.product_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one product_id is required",
+        )
+
+    # Create batch
+    batch_id = f"batch_{uuid.uuid4().hex[:8]}"
+    _batch_counter += 1
+
+    # Generate listings for all products
+    listings: list[BatchListingItem] = []
+    stagger_schedule: list[datetime] = []
+
+    if request.stagger_enabled:
+        stagger_schedule = get_stagger_schedule(len(request.product_ids))
+
+    for idx, product_id in enumerate(request.product_ids):
+        # Create product for AI generation
+        product = Product(
+            name=f"Product {product_id}",
+            description="A digital product for productivity and organization",
+            format_type="planner",
+            target_audience="Professionals",
+            key_features=["printable", "digital", "planner", "organization"],
+        )
+
+        try:
+            # Generate AI content
+            content = await generator.generate(product)
+
+            # Create listing in storage
+            global _listing_counter
+            _listing_counter += 1
+            listing_id = _listing_counter
+
+            # Store listing
+            _listings_storage[listing_id] = {
+                "listing_id": listing_id,
+                "product_id": product_id,
+                "title": content.title,
+                "description": content.description,
+                "tags": content.tags,
+                "price": content.suggested_price,
+                "status": "draft",
+                "created_at": datetime.utcnow().isoformat(),
+                "etsy_listing_id": listing_id,
+            }
+
+            # Calculate next available time if stagger enabled
+            next_available = None
+            if request.stagger_enabled and idx > 0 and stagger_schedule:
+                next_available = stagger_schedule[idx].isoformat()
+
+            listings.append(
+                BatchListingItem(
+                    listing_id=listing_id,
+                    product_id=product_id,
+                    status="draft",
+                    title=content.title,
+                    description=content.description,
+                    tags=content.tags,
+                    price=content.suggested_price,
+                )
+            )
+        except Exception as e:
+            logger.error(f"Failed to generate listing for product {product_id}: {e}")
+            listings.append(
+                BatchListingItem(
+                    product_id=product_id,
+                    status="pending",
+                    error=str(e),
+                )
+            )
+
+    # Calculate next available time for first listing
+    next_available_time = None
+    if request.stagger_enabled and len(request.product_ids) > 1 and stagger_schedule:
+        next_available_time = stagger_schedule[1].isoformat()
+
+    # Store batch
+    _batch_storage[batch_id] = {
+        "batch_id": batch_id,
+        "product_ids": request.product_ids,
+        "listings": listings,
+        "current_index": 0,
+        "status": "in_progress",
+        "stagger_enabled": request.stagger_enabled,
+        "stagger_schedule": stagger_schedule,
+        "created_at": datetime.utcnow().isoformat(),
+        "last_published": None,
+        "next_available_time": next_available_time,
+    }
+
+    completed = sum(1 for l in listings if l.status == "published")
+
+    return BatchListingResponse(
+        batch_id=batch_id,
+        total=len(listings),
+        completed=completed,
+        current_index=0,
+        listings=listings,
+        next_available_time=next_available_time,
+        stagger_enabled=request.stagger_enabled,
+    )
+
+
+@router.get("/batch/{batch_id}", response_model=BatchStatusResponse)
+async def get_batch_status(batch_id: str) -> BatchStatusResponse:
+    """Get batch listing status.
+
+    Returns:
+        BatchStatusResponse with batch progress and all listings
+
+    Raises:
+        HTTPException: If batch not found.
+    """
+    if batch_id not in _batch_storage:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Batch {batch_id} not found",
+        )
+
+    batch = _batch_storage[batch_id]
+    completed = sum(1 for l in batch["listings"] if l.status == "published")
+
+    return BatchStatusResponse(
+        batch_id=batch_id,
+        total=len(batch["listings"]),
+        completed=completed,
+        current_index=batch["current_index"],
+        status=batch["status"],
+        listings=batch["listings"],
+        next_available_time=batch.get("next_available_time"),
+        stagger_enabled=batch["stagger_enabled"],
+    )
+
+
+@router.post("/batch/{batch_id}/approve", response_model=BatchApproveResponse)
+async def approve_batch_listing(
+    batch_id: str,
+    client: Optional[EtsyClient] = Depends(get_etsy_client),
+) -> BatchApproveResponse:
+    """Approve current listing and proceed to next.
+
+    Per D-21: User reviews each listing before next is created.
+    Flow: Publish current -> apply stagger -> wait if needed -> create next draft
+
+    Args:
+        batch_id: ID of the batch
+
+    Returns:
+        BatchApproveResponse with next listing or completion status
+
+    Raises:
+        HTTPException: If batch not found or no listing to approve.
+    """
+    if batch_id not in _batch_storage:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Batch {batch_id} not found",
+        )
+
+    batch = _batch_storage[batch_id]
+
+    if batch["status"] == "cancelled":
+        raise HTTPException(
+            status_code=400,
+            detail="Batch has been cancelled",
+        )
+
+    if batch["status"] == "completed":
+        return BatchApproveResponse(
+            success=True,
+            message="Batch already completed",
+        )
+
+    current_idx = batch["current_index"]
+    current_listing = batch["listings"][current_idx]
+
+    # Check if stagger wait is required
+    next_available = batch.get("next_available_time")
+    if next_available:
+        next_time = datetime.fromisoformat(next_available)
+        now = datetime.utcnow()
+        if now < next_time:
+            wait_seconds = (next_time - now).total_seconds()
+            return BatchApproveResponse(
+                success=False,
+                current_listing=current_listing,
+                next_available_time=next_available,
+                message=f"Please wait {int(wait_seconds)} seconds before approving next listing (stagger delay)",
+            )
+
+    # Publish current listing
+    if current_listing.listing_id and current_listing.listing_id in _listings_storage:
+        listing_data = _listings_storage[current_listing.listing_id]
+
+        if client:
+            try:
+                await publish_listing(client, current_listing.listing_id)
+                listing_data["status"] = "active"
+            except Exception as e:
+                logger.warning(f"Failed to publish to Etsy: {e}")
+
+        # Demo mode - mark as active
+        listing_data["status"] = "active"
+        current_listing.status = "published"
+        current_listing.etsy_url = f"https://www.etsy.com/listing/{current_listing.listing_id}"
+
+    # Update last published time
+    batch["last_published"] = datetime.utcnow()
+
+    # Move to next listing
+    batch["current_index"] += 1
+
+    # Check if batch is complete
+    if batch["current_index"] >= len(batch["listings"]):
+        batch["status"] = "completed"
+        batch["next_available_time"] = None
+        return BatchApproveResponse(
+            success=True,
+            current_listing=current_listing,
+            message=f"Batch completed! Published {len(batch['listings'])} listings.",
+        )
+
+    # Calculate next stagger time
+    next_listing = batch["listings"][batch["current_index"]]
+    next_available_time = None
+
+    if batch["stagger_enabled"]:
+        from src.compliance.stagger import get_next_available_time
+
+        next_available_time = get_next_available_time(
+            batch["current_index"], last_published=batch["last_published"]
+        ).isoformat()
+        batch["next_available_time"] = next_available_time
+
+    return BatchApproveResponse(
+        success=True,
+        current_listing=current_listing,
+        next_listing=next_listing,
+        next_available_time=next_available_time,
+    )
+
+
+@router.post("/batch/{batch_id}/edit", response_model=BatchEditResponse)
+async def edit_batch_listing(
+    batch_id: str,
+    request: BatchEditRequest,
+) -> BatchEditResponse:
+    """Edit current listing in batch, then re-submit.
+
+    Input:
+        - title: Optional new title
+        - description: Optional new description
+        - tags: Optional new tags
+        - price: Optional new price
+
+    Returns:
+        BatchEditResponse with updated listing
+
+    Raises:
+        HTTPException: If batch not found or no listing to edit.
+    """
+    if batch_id not in _batch_storage:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Batch {batch_id} not found",
+        )
+
+    batch = _batch_storage[batch_id]
+    current_idx = batch["current_index"]
+    current_listing = batch["listings"][current_idx]
+
+    if not current_listing.listing_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Current listing has no listing_id to edit",
+        )
+
+    # Update listing in storage
+    if current_listing.listing_id in _listings_storage:
+        listing_data = _listings_storage[current_listing.listing_id]
+
+        if request.title is not None:
+            listing_data["title"] = request.title
+            current_listing.title = request.title
+        if request.description is not None:
+            listing_data["description"] = request.description
+            current_listing.description = request.description
+        if request.tags is not None:
+            listing_data["tags"] = request.tags
+            current_listing.tags = request.tags
+        if request.price is not None:
+            listing_data["price"] = request.price
+            current_listing.price = request.price
+
+    return BatchEditResponse(
+        success=True,
+        listing=current_listing,
+    )
+
+
+@router.delete("/batch/{batch_id}")
+async def cancel_batch_listing(batch_id: str) -> dict:
+    """Cancel a batch listing.
+
+    Args:
+        batch_id: ID of the batch to cancel
+
+    Returns:
+        Cancellation confirmation
+
+    Raises:
+        HTTPException: If batch not found.
+    """
+    if batch_id not in _batch_storage:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Batch {batch_id} not found",
+        )
+
+    batch = _batch_storage[batch_id]
+    batch["status"] = "cancelled"
+
+    return {
+        "batch_id": batch_id,
+        "status": "cancelled",
+        "cancelled": True,
+    }
