@@ -1,26 +1,24 @@
 ---
 phase: 04-research-validation
-verified: 2026-03-27T00:00:00Z
-status: gaps_found
+verified: 2026-03-27T02:30:00Z
+status: passed
 score: 10/10 must_haves verified
-re_verification: false
-gaps:
-  - truth: "User can approve niche, request retry, or cancel workflow"
-    status: partial
-    reason: "Workflow code attempts to access dict as object"
-    artifacts:
-      - path: "src/workflows/research.py"
-        issue: "verify_step accesses verified_niches as VerifiedNiche objects (line 108-119), but verify_demand() returns dicts. This will cause AttributeError at runtime."
-    missing:
-      - "Fix verify_step to handle dicts returned by verify_demand(), or have verify_demand return VerifiedNiche objects instead of dicts"
+re_verification: true
+previous_status: gaps_found
+previous_gaps:
+  - "Type Mismatch in verify_step - dict vs object access"
+gaps_closed:
+  - "verify_step now uses dict access syntax (vn['recommendation']) instead of object access (vn.niche)"
+gaps_remaining: []
+regressions: []
 ---
 
 # Phase 4: Research & Validation Verification Report
 
 **Phase Goal:** Create AI-powered niche analysis system with verification (per ROADMAP.md)
 **Verified:** 2026-03-27
-**Status:** gaps_found
-**Re-verification:** No — initial verification
+**Status:** passed
+**Re-verification:** Yes — after gap closure
 
 ## Goal Achievement
 
@@ -50,7 +48,7 @@ gaps:
 | `src/niche_research/sources.py` | Source citation (min 40 lines) | ✓ VERIFIED | 144 lines - Source dataclass, SourceTracker class, DEFAULT_SOURCES |
 | `src/niche_research/verifier.py` | Verification (min 100 lines) | ✓ VERIFIED | 296 lines - verify_demand() with pytrends, demand scoring formula, rate limiting |
 | `src/api/research_routes.py` | API endpoints | ✓ VERIFIED | 370 lines - POST /analyze, POST /verify, POST /start, POST /approve, GET /status |
-| `src/workflows/research.py` | LangGraph workflow (min 100 lines) | ✓ VERIFIED | 378 lines - NicheResearchWorkflow with analyze, verify, checkpoint steps |
+| `src/workflows/research.py` | LangGraph workflow (min 100 lines) | ✓ VERIFIED | 382 lines - NicheResearchWorkflow with analyze, verify, checkpoint steps |
 
 ### Key Link Verification
 
@@ -59,7 +57,7 @@ gaps:
 | `analyzer.py` | `schemas.py` | Pydantic validation | ✓ WIRED | Imports NicheRecommendation, validates response |
 | `research_routes.py` | `analyzer.py` | analyze_niche() | ✓ WIRED | Calls analyze_niche() at line 115 |
 | `research.py` | `analyzer.py` | analyze_step | ✓ WIRED | Calls analyze_niche() at line 62 |
-| `research.py` | `verifier.py` | verify_step | ⚠️ PARTIAL | Calls verify_demand() but expects objects, gets dicts |
+| `research.py` | `verifier.py` | verify_step | ✓ WIRED | Now uses dict access (lines 110-124) |
 
 ### Data-Flow Trace (Level 4)
 
@@ -68,6 +66,7 @@ gaps:
 | `analyzer.py` | recommendations | OpenAI GPT-4o API | Yes (real AI response) | ✓ FLOWING |
 | `verifier.py` | verified_niches | Google Trends pytrends | Yes (real search data) | ✓ FLOWING |
 | `research_routes.py` | verified_niches | verify_demand() | Yes | ✓ FLOWING |
+| `research.py` | verified_niches | verify_step | Yes | ✓ FLOWING |
 
 ### Behavioral Spot-Checks
 
@@ -77,8 +76,7 @@ gaps:
 | Analyzer imports | `python -c "from src.niche_research.analyzer import analyze_niche"` | OK | ✓ PASS |
 | Verifier imports | `python -c "from src.niche_research.verifier import verify_demand"` | OK | ✓ PASS |
 | Workflow imports | `python -c "from src.workflows.research import NicheResearchWorkflow"` | OK | ✓ PASS |
-| Verify returns dicts | `verify_demand()` test | Returns dicts | ✓ PASS |
-| Workflow wiring check | Code review of verify_step | AttributeError bug | ✗ FAIL |
+| verify_step dict access | grep "vn\[" src/workflows/research.py | Found dict accesses | ✓ PASS |
 
 ### Requirements Coverage
 
@@ -102,44 +100,36 @@ None — all verifiable programmatically.
 
 ---
 
-## Gaps Summary
+## Gap Closure Verification
 
-### Gap 1: Type Mismatch in verify_step
+### Previous Gap: Type Mismatch in verify_step
 
-**Truth:** "User can approve niche, request retry, or cancel workflow"
+**Original Issue:** verify_step accessed `verify_demand()` return values as objects (`vn.niche`) instead of dicts (`vn["niche"]`).
 
-**Status:** partial — Code will crash at runtime
-
-**Issue:** The `verify_step` function in `src/workflows/research.py` (lines 103-127) accesses the returned value from `verify_demand()` as if it were `VerifiedNiche` objects:
-
+**Fix Applied:** Lines 110-124 in research.py now use dictionary access:
 ```python
-verified_niches = verify_demand(rec_objects)
-
-# Lines 108-119 try to access as objects:
-for vn in verified_niches:
-    niche = vn.niche  # AttributeError: 'dict' object has no attribute 'niche'
+"niche": vn["recommendation"]["niche"],
+"target_audience": vn["recommendation"]["target_audience"],
+"demand_score": vn["demand_score"],
+...
 ```
 
-However, `verify_demand()` returns a list of **dictionaries** (not `VerifiedNiche` objects). This is confirmed by the actual return:
-- `result[0].keys()` = `dict_keys(['recommendation', 'demand_score', 'trend_direction', ...])`
-
-**Fix needed:** Either:
-1. Modify `verify_step` to access dict keys (e.g., `vn["niche"]` instead of `vn.niche`), OR
-2. Modify `verify_demand()` to return `VerifiedNiche` Pydantic objects instead of dicts
-
-The output structure is already correct in both cases — the issue is how `verify_step` accesses the data.
+**Verification:** 
+- ✓ No more `vn.niche` patterns in code
+- ✓ Workflow imports successfully
+- ✓ All imports pass
 
 ---
 
 ## Overall Status
 
-**Status:** gaps_found
+**Status:** passed
 
-The phase achieved 10/10 observable truths and all artifacts exist with substantive implementation. Key links are mostly wired correctly. However, there is a type mismatch in the workflow that would cause a runtime crash — `verify_step` expects objects but receives dictionaries.
+All 10 observable truths verified. All artifacts exist, are substantive, and are wired correctly. The previous gap has been resolved — verify_step now correctly accesses dictionary output from verify_demand().
 
-This gap is classified as **partial** because:
-- The workflow API endpoints exist and are wired correctly (start, approve, status)
-- The checkpoint data is correctly set up
-- Only the internal verify_step execution would fail when run through the workflow
+**Re-verification result:** All gaps closed, no regressions detected.
 
-The core functionality (analyze + verify + checkpoint) is implemented correctly. This is a wiring-level bug within the workflow, not a missing feature.
+---
+
+_Verified: 2026-03-27T02:30:00Z_
+_Verifier: the agent (gsd-verifier)_
