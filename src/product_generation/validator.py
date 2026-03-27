@@ -9,8 +9,7 @@ Provides validation for generated digital products:
 Per D-03: AI does initial assessment, human does final approval via dashboard.
 """
 
-from enum import Literal
-from typing import Optional
+from typing import Literal, Optional
 
 # Try to import OpenAI - validation can work without it
 try:
