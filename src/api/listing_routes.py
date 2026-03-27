@@ -14,8 +14,9 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
+from fastapi.responses import JSONResponse
 
 from src.ai.listing_generator import ListingContent, ListingGenerator, Product
 from src.api.main import get_openai_client
@@ -26,6 +27,15 @@ from src.etsy.listing import (
     get_listing,
     publish_listing,
     update_listing,
+)
+from src.etsy.image_upload import (
+    upload_listing_image,
+    upload_product_images,
+)
+from src.etsy.file_upload import (
+    upload_digital_file,
+    set_listing_as_download,
+    upload_and_configure_digital,
 )
 from src.etsy.oauth import EtsyOAuth
 
@@ -104,6 +114,37 @@ class PublishResponse(BaseModel):
 
     success: bool
     etsy_listing_url: Optional[str] = None
+
+
+class ImageUploadResponse(BaseModel):
+    """Response model for image upload."""
+
+    image_id: int
+    listing_id: int
+    rank: int
+
+
+class BulkImageUploadResponse(BaseModel):
+    """Response model for bulk image upload."""
+
+    image_ids: list[int]
+    listing_id: int
+    count: int
+
+
+class FileUploadResponse(BaseModel):
+    """Response model for digital file upload."""
+
+    file_id: str
+    listing_id: int
+    digital: bool
+    quantity_unlimited: bool
+
+
+class ImageListResponse(BaseModel):
+    """Response model for listing images."""
+
+    images: list[dict]
 
 
 # Dependencies
@@ -468,3 +509,306 @@ async def delete_listing_endpoint(
         "listing_id": listing_id,
         "deleted": True,
     }
+
+
+# ============ Image Upload Endpoints ============
+
+
+@router.post("/{listing_id}/images", response_model=ImageUploadResponse)
+async def upload_listing_image_endpoint(
+    listing_id: int,
+    file: UploadFile = File(...),
+    client: Optional[EtsyClient] = Depends(get_etsy_client),
+) -> ImageUploadResponse:
+    """Upload a single image to a listing.
+
+    Accepts JPEG or PNG images. First image uploaded becomes
+    the main listing image.
+
+    Args:
+        listing_id: ID of the listing to add image to.
+        file: Image file (JPEG/PNG).
+        client: EtsyClient dependency.
+
+    Returns:
+        ImageUploadResponse with image_id and details.
+
+    Raises:
+        HTTPException: If listing not found or upload fails.
+    """
+    # Check listing exists
+    if listing_id not in _listings_storage:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Listing {listing_id} not found",
+        )
+
+    # Validate file type
+    filename = file.filename or "image.jpg"
+    if not filename.lower().endswith((".jpg", ".jpeg", ".png")):
+        raise HTTPException(
+            status_code=400,
+            detail="Only JPEG and PNG images are supported",
+        )
+
+    if client:
+        try:
+            # Read file content
+            content = await file.read()
+            # Create BytesIO object
+            from io import BytesIO
+
+            file_obj = BytesIO(content)
+            file_obj.name = file.filename
+
+            image_id = await upload_listing_image(
+                client=client,
+                listing_id=listing_id,
+                image_file=file_obj,
+                rank=1,  # Will be overridden if more images exist
+            )
+
+            return ImageUploadResponse(
+                image_id=image_id,
+                listing_id=listing_id,
+                rank=1,
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to upload image: {str(e)}",
+            )
+
+    # Demo mode - return mock response
+    import random
+
+    return ImageUploadResponse(
+        image_id=random.randint(1000, 9999),
+        listing_id=listing_id,
+        rank=1,
+    )
+
+
+@router.post("/{listing_id}/images/bulk", response_model=BulkImageUploadResponse)
+async def upload_multiple_images_endpoint(
+    listing_id: int,
+    files: list[UploadFile] = File(...),
+    client: Optional[EtsyClient] = Depends(get_etsy_client),
+) -> BulkImageUploadResponse:
+    """Upload multiple images to a listing (max 10).
+
+    Etsy limit: 10 images per listing.
+    First image in list becomes main listing image.
+
+    Args:
+        listing_id: ID of the listing to add images to.
+        files: List of image files (JPEG/PNG).
+        client: EtsyClient dependency.
+
+    Returns:
+        BulkImageUploadResponse with image_ids and count.
+
+    Raises:
+        HTTPException: If too many images or upload fails.
+    """
+    # Check listing exists
+    if listing_id not in _listings_storage:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Listing {listing_id} not found",
+        )
+
+    # Validate image count
+    if len(files) > 10:
+        raise HTTPException(
+            status_code=400,
+            detail="Etsy allows max 10 images per listing",
+        )
+
+    # Validate file types
+    for f in files:
+        fname = f.filename or "image.jpg"
+        if not fname.lower().endswith((".jpg", ".jpeg", ".png")):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file: {f.filename}. Only JPEG and PNG allowed",
+            )
+
+    if client:
+        try:
+            from io import BytesIO
+
+            image_files = []
+            for f in files:
+                content = await f.read()
+                file_obj = BytesIO(content)
+                file_obj.name = f.filename
+                image_files.append(file_obj)
+
+            image_ids = await upload_product_images(
+                client=client,
+                listing_id=listing_id,
+                image_files=image_files,
+            )
+
+            return BulkImageUploadResponse(
+                image_ids=image_ids,
+                listing_id=listing_id,
+                count=len(image_ids),
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to upload images: {str(e)}",
+            )
+
+    # Demo mode - return mock response
+    import random
+
+    return BulkImageUploadResponse(
+        image_ids=[random.randint(1000, 9999) for _ in files],
+        listing_id=listing_id,
+        count=len(files),
+    )
+
+
+@router.get("/{listing_id}/images", response_model=ImageListResponse)
+async def get_listing_images(
+    listing_id: int,
+    client: Optional[EtsyClient] = Depends(get_etsy_client),
+) -> ImageListResponse:
+    """Get all images for a listing.
+
+    Args:
+        listing_id: ID of the listing.
+        client: EtsyClient dependency.
+
+    Returns:
+        ImageListResponse with list of images.
+    """
+    # Check listing exists
+    if listing_id not in _listings_storage:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Listing {listing_id} not found",
+        )
+
+    # TODO: Fetch actual images from Etsy API
+    # For now, return empty list
+    return ImageListResponse(images=[])
+
+
+@router.delete("/{listing_id}/images/{image_id}")
+async def delete_listing_image(
+    listing_id: int,
+    image_id: int,
+    client: Optional[EtsyClient] = Depends(get_etsy_client),
+) -> dict:
+    """Delete an image from a listing.
+
+    Args:
+        listing_id: ID of the listing.
+        image_id: ID of the image to delete.
+        client: EtsyClient dependency.
+
+    Returns:
+        Deletion confirmation.
+    """
+    # Check listing exists
+    if listing_id not in _listings_storage:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Listing {listing_id} not found",
+        )
+
+    # TODO: Call Etsy API to delete image
+    logger.info(f"Would delete image {image_id} from listing {listing_id}")
+
+    return {
+        "listing_id": listing_id,
+        "image_id": image_id,
+        "deleted": True,
+    }
+
+
+# ============ Digital File Upload Endpoints ============
+
+
+@router.post("/{listing_id}/files", response_model=FileUploadResponse)
+async def upload_digital_file_endpoint(
+    listing_id: int,
+    file: UploadFile = File(...),
+    client: Optional[EtsyClient] = Depends(get_etsy_client),
+) -> FileUploadResponse:
+    """Upload a digital file to a listing for download delivery.
+
+    Per D-18: Etsy file hosting - Etsy handles download delivery.
+    Sets listing as digital download with unlimited quantity.
+
+    Args:
+        listing_id: ID of the listing to add file to.
+        file: PDF file for digital delivery.
+        client: EtsyClient dependency.
+
+    Returns:
+        FileUploadResponse with file_id and configuration.
+
+    Raises:
+        HTTPException: If listing not found or upload fails.
+    """
+    # Check listing exists
+    if listing_id not in _listings_storage:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Listing {listing_id} not found",
+        )
+
+    # Validate file type
+    filename = file.filename or "product.pdf"
+    if not filename.lower().endswith(".pdf"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF files are supported for digital delivery",
+        )
+
+    if client:
+        try:
+            # Read file content
+            content = await file.read()
+            from io import BytesIO
+
+            file_obj = BytesIO(content)
+            file_obj.name = filename
+
+            # Get shop_id from listing
+            shop_id = 0  # Would get from user's shops
+
+            result = await upload_and_configure_digital(
+                client=client,
+                shop_id=shop_id,
+                listing_id=listing_id,
+                file_data=file_obj,
+                filename=filename,
+            )
+
+            return FileUploadResponse(
+                file_id=result["file_id"],
+                listing_id=listing_id,
+                digital=result["digital"],
+                quantity_unlimited=result["quantity_unlimited"],
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to upload digital file: {str(e)}",
+            )
+
+    # Demo mode - return mock response
+    import random
+
+    return FileUploadResponse(
+        file_id=f"file_{random.randint(1000, 9999)}",
+        listing_id=listing_id,
+        digital=True,
+        quantity_unlimited=True,
+    )
