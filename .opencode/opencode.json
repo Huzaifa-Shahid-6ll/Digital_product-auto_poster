@@ -1,0 +1,11 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "read": {
+      "G:/ONGOING PROJECTS/Digital_product-auto_poster/.opencode/get-shit-done/*": "allow"
+    },
+    "external_directory": {
+      "G:/ONGOING PROJECTS/Digital_product-auto_poster/.opencode/get-shit-done/*": "allow"
+    }
+  }
+}

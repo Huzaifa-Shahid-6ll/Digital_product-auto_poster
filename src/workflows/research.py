@@ -107,15 +107,19 @@ def verify_step(state: WorkflowState) -> WorkflowState:
 
         state["step_results"]["verified_niches"] = [
             {
-                "niche": vn.niche,
-                "target_audience": vn.target_audience,
-                "demand_score": vn.demand_score,
-                "demand_level": vn.demand_level,
-                "search_interest": vn.search_interest,
-                "competition_factor": vn.competition_factor,
-                "trend_direction": vn.trend_direction,
-                "verified_at": vn.verified_at,
-                "sources": vn.sources,
+                "niche": vn["recommendation"]["niche"],
+                "target_audience": vn["recommendation"]["target_audience"],
+                "demand_score": vn["demand_score"],
+                "demand_level": vn["category"],
+                "search_interest": vn["verification_data"]["average_interest"],
+                "competition_factor": 1.0
+                if vn["recommendation"]["competition_level"] == "low"
+                else 0.6
+                if vn["recommendation"]["competition_level"] == "medium"
+                else 0.3,
+                "trend_direction": vn["trend_direction"],
+                "verified_at": vn["verification_data"]["queried_at"],
+                "sources": vn["verification_data"]["source"],
             }
             for vn in verified_niches
         ]

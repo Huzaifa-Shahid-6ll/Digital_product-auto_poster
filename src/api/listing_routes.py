@@ -25,7 +25,6 @@ from pydantic import BaseModel, Field
 from fastapi.responses import JSONResponse
 
 from src.ai.listing_generator import ListingContent, ListingGenerator, Product
-from src.api.main import get_openai_client
 from src.etsy.client import EtsyClient
 from src.etsy.listing import (
     create_draft_listing,
@@ -45,6 +44,7 @@ from src.etsy.file_upload import (
 )
 from src.etsy.oauth import EtsyOAuth
 from src.compliance.stagger import calculate_stagger_delay, get_stagger_schedule
+from src.compliance import apply_compliance
 
 logger = logging.getLogger(__name__)
 
@@ -266,6 +266,8 @@ def get_listing_generator() -> ListingGenerator:
     Raises:
         HTTPException: If OpenAI client not configured.
     """
+    from src.api.main import get_openai_client
+
     try:
         client = get_openai_client()
     except HTTPException:
@@ -325,6 +327,20 @@ async def create_listing(
     description = request.description or content.description
     tags = request.tags or content.tags
     price = request.price_override or content.suggested_price
+
+    # Apply compliance layer
+    try:
+        compliance_result = apply_compliance(
+            title=title,
+            description=description,
+            tags=tags,
+        )
+        title = compliance_result.title
+        description = compliance_result.description
+        tags = compliance_result.tags
+    except Exception as e:
+        logger.warning(f"Compliance check failed: {e}")
+        # Continue without compliance if it fails
 
     # Create draft listing on Etsy if client available
     listing_id: Optional[int] = None
@@ -962,6 +978,22 @@ async def create_batch_listing(
             # Generate AI content
             content = await generator.generate(product)
 
+            # Apply compliance
+            title = content.title
+            description = content.description
+            tags = content.tags
+            try:
+                compliance_result = apply_compliance(
+                    title=title,
+                    description=description,
+                    tags=tags,
+                )
+                title = compliance_result.title
+                description = compliance_result.description
+                tags = compliance_result.tags
+            except Exception as e:
+                logger.warning(f"Compliance check failed: {e}")
+
             # Create listing in storage
             global _listing_counter
             _listing_counter += 1
@@ -971,9 +1003,9 @@ async def create_batch_listing(
             _listings_storage[listing_id] = {
                 "listing_id": listing_id,
                 "product_id": product_id,
-                "title": content.title,
-                "description": content.description,
-                "tags": content.tags,
+                "title": title,
+                "description": description,
+                "tags": tags,
                 "price": content.suggested_price,
                 "status": "draft",
                 "created_at": datetime.utcnow().isoformat(),
@@ -990,9 +1022,9 @@ async def create_batch_listing(
                     listing_id=listing_id,
                     product_id=product_id,
                     status="draft",
-                    title=content.title,
-                    description=content.description,
-                    tags=content.tags,
+                    title=title,
+                    description=description,
+                    tags=tags,
                     price=content.suggested_price,
                 )
             )
