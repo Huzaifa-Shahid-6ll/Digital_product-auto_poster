@@ -40,7 +40,7 @@
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | NR-01 | Phase 4 | Complete |
-| NR-02 | Phase 4 | Pending |
+| NR-02 | Phase 4 | Complete |
 | PG-01 | Phase 2 | Complete |
 | PG-02 | Phase 2 | Complete |
 | MK-01 | Phase 3 | Pending |
