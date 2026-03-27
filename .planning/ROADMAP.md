@@ -94,7 +94,11 @@
 3. Human-in-the-loop checkpoint requires user confirmation before proceeding to product generation
 4. System cites sources for market data (no hallucinations)
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+- [x] 04-01-PLAN.md — AI Analysis: Pydantic schemas, analyzer with OpenAI, source citation
+- [ ] 04-02-PLAN.md — Demand Verification: Google Trends verification, demand scoring formula
+- [ ] 04-03-PLAN.md — Workflow with Checkpoint: LangGraph workflow, human verification
 
 ---
 
@@ -125,7 +129,7 @@
 | 1. Core Automation Engine | 4/4 | Complete | 2026-03-26 |
 | 2. Product Generation | 3/3 | Complete    | 2026-03-26 |
 | 3. Listing Creation | 0/5 | Not started | - |
-| 4. Research & Validation | 0/4 | Not started | - |
+| 4. Research & Validation | 0/3 | Not started | - |
 | 5. Analytics & Measurement | 0/4 | Not started | - |
 
 ---
