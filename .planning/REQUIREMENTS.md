@@ -6,7 +6,7 @@
 
 | ID | Requirement | Category | Status | Phase |
 |----|-------------|----------|--------|-------|
-| NR-01 | AI-powered market analysis to find profitable niches | Niche Research | Pending | Phase 4 |
+| NR-01 | AI-powered market analysis to find profitable niches | Niche Research | Complete | Phase 4 |
 | NR-02 | Verify niche demand with real market data | Niche Research | Pending | Phase 4 |
 
 ### Product Generation (PG-01 to PG-02)
@@ -39,12 +39,12 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| NR-01 | Phase 4 | Pending |
+| NR-01 | Phase 4 | Complete |
 | NR-02 | Phase 4 | Pending |
 | PG-01 | Phase 2 | Complete |
 | PG-02 | Phase 2 | Complete |
 | MK-01 | Phase 3 | Pending |
-| MK-02 | Phase 3 | Pending |
+| MK-02 | Phase 3 | Complete |
 | TG-01 | - | Deferred |
 | AN-01 | Phase 5 | Pending |
 
