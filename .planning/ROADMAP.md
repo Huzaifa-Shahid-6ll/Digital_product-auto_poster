@@ -70,9 +70,13 @@
 4. System includes compliance layer (keyword filtering, AI disclosure, staggered publishing)
 5. Listing goes live on Etsy with correct pricing
 
-**Plans**: TBD
+**Plans**: 5 plans
 
-**UI hint**: yes
+- [ ] 03-01-PLAN.md — OAuth flow: Etsy OAuth with PKCE, token refresh, multi-shop support
+- [ ] 03-02-PLAN.md — Listing creation: AI title/desc/tags generation, listing API endpoints
+- [ ] 03-03-PLAN.md — Image/file upload: Upload images to Etsy CDN, digital file delivery
+- [ ] 03-04-PLAN.md — Compliance layer: Keyword filtering, AI disclosure, staggered publishing
+- [ ] 03-05-PLAN.md — Batch listing: Sequential batch with review checkpoints
 
 ---
 
@@ -119,7 +123,7 @@
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Core Automation Engine | 4/4 | Complete | 2026-03-26 |
-| 2. Product Generation | 3/3 | Complete   | 2026-03-26 |
+| 2. Product Generation | 3/3 | Complete    | 2026-03-26 |
 | 3. Listing Creation | 0/5 | Not started | - |
 | 4. Research & Validation | 0/4 | Not started | - |
 | 5. Analytics & Measurement | 0/4 | Not started | - |
