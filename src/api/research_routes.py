@@ -2,15 +2,21 @@
 
 REST endpoints for:
 - POST /api/research/analyze - Analyze keywords and get niche recommendations
+- POST /api/research/verify - Verify niche recommendations with Google Trends
 
 Mounted at /api/research in main app.
 """
+
+from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
 from src.niche_research.analyzer import NicheAnalysisError, analyze_niche
+from src.niche_research.schemas import NicheRecommendation
+from src.niche_research.verifier import VerificationError, get_verification_summary, verify_demand
 
 # Create router
 router = APIRouter(tags=["research"])
@@ -60,6 +66,25 @@ class ResearchAnalyzeResponse(BaseModel):
     analyzed_at: str
 
 
+# Request model for verification endpoint
+class ResearchVerifyRequest(BaseModel):
+    """Request model for verifying niche recommendations.
+
+    Attributes:
+        recommendations: List of NicheRecommendation objects to verify.
+    """
+
+    recommendations: list[dict] = Field(..., description="Niche recommendations to verify")
+
+
+class ResearchVerifyResponse(BaseModel):
+    """Response model for verification endpoint."""
+
+    verified_niches: list[dict]
+    summary: dict[str, int]
+    verified_at: str
+
+
 # Routes
 
 
@@ -91,9 +116,6 @@ async def analyze_niche_endpoint(
             client=client,
         )
 
-        # Convert to response format
-        from datetime import datetime
-
         return ResearchAnalyzeResponse(
             recommendations=[
                 {
@@ -121,4 +143,54 @@ async def analyze_niche_endpoint(
         raise HTTPException(
             status_code=503,
             detail=f"Niche analysis failed: {str(e)}",
+        )
+
+
+@router.post("/verify", response_model=ResearchVerifyResponse, status_code=201)
+async def verify_niches_endpoint(request: ResearchVerifyRequest) -> ResearchVerifyResponse:
+    """Verify niche recommendations with real market data from Google Trends.
+
+    Takes a list of NicheRecommendation objects, fetches real search interest
+    data from Google Trends, calculates demand scores using the proven formula,
+    and applies threshold logic.
+
+    Args:
+        request: ResearchVerifyRequest with list of recommendations.
+
+    Returns:
+        ResearchVerifyResponse with verified niches and demand scores.
+
+    Raises:
+        HTTPException: If verification fails or rate limit exceeded.
+    """
+    try:
+        # Convert dict back to NicheRecommendation objects
+        recommendations: list[NicheRecommendation] = []
+        for rec_dict in request.recommendations:
+            recommendation = NicheRecommendation(**rec_dict)
+            recommendations.append(recommendation)
+
+        # Call the verifier
+        verified_niches = verify_demand(recommendations)
+
+        # Generate summary
+        summary = get_verification_summary(verified_niches)
+
+        return ResearchVerifyResponse(
+            verified_niches=verified_niches,
+            summary=summary,
+            verified_at=datetime.utcnow().isoformat(),
+        )
+
+    except VerificationError as e:
+        # Google Trends rate limit or API error
+        raise HTTPException(
+            status_code=429,
+            detail=f"Niche verification failed (rate limit): {str(e)}",
+        )
+    except ValueError as e:
+        # Validation error
+        raise HTTPException(
+            status_code=422,
+            detail=str(e),
         )
