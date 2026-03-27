@@ -130,6 +130,21 @@ from src.api import review_routes as review_api_routes
 
 app.include_router(review_api_routes.router, prefix="/api")
 
+# Register Etsy OAuth routes
+from src.api import etsy_routes as etsy_api_routes
+
+app.include_router(etsy_api_routes.router, prefix="/api/auth/etsy")
+
+# Register listing routes
+from src.api import listing_routes as listing_api_routes
+
+app.include_router(listing_api_routes.router, prefix="/api")
+
+# Register research routes
+from src.api import research_routes as research_api_routes
+
+app.include_router(research_api_routes.router, prefix="/api/research")
+
 
 @app.get("/health")
 async def health_check() -> dict:
