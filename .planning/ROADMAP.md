@@ -118,9 +118,9 @@
 
 **Plans**: 3 plans
 
-- [ ] 05-01-PLAN.md — Analytics Backend: schemas, collector, aggregator
-- [ ] 05-02-PLAN.md — Dashboard UI: Streamlit app with 4 views
-- [ ] 05-03-PLAN.md — Attribution & Insights: sales attribution, AI insights
+- [x] 05-01-PLAN.md — Analytics Backend: schemas, collector, aggregator
+- [x] 05-02-PLAN.md — Dashboard UI: Streamlit app with 4 views
+- [x] 05-03-PLAN.md — Attribution & Insights: sales attribution, AI insights
 
 **UI hint**: yes
 
@@ -134,7 +134,7 @@
 | 2. Product Generation | 3/3 | Complete | 2026-03-26 |
 | 3. Listing Creation | 0/5 | Not started | - |
 | 4. Research & Validation | 3/3 | Complete | 2026-03-27 |
-| 5. Analytics & Measurement | 0/3 | Planned | - |
+| 5. Analytics & Measurement | 3/3 | Complete | 2026-03-28 |
 
 ---
 
