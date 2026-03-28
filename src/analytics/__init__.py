@@ -13,6 +13,7 @@ Per AN-01: Track listing performance and enable data-driven validation.
 from src.analytics.schemas import (
     AnalyticsEvent,
     AttributionRecord,
+    Insight,
     ListingMetrics,
     TimeSeriesData,
 )
@@ -22,4 +23,5 @@ __all__ = [
     "AnalyticsEvent",
     "TimeSeriesData",
     "AttributionRecord",
+    "Insight",
 ]

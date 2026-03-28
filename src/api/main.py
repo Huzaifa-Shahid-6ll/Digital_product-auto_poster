@@ -145,6 +145,11 @@ from src.api import research_routes as research_api_routes
 
 app.include_router(research_api_routes.router, prefix="/api/research")
 
+# Register analytics routes
+from src.api import analytics_routes as analytics_api_routes
+
+app.include_router(analytics_api_routes.router, prefix="/api/analytics")
+
 
 @app.get("/health")
 async def health_check() -> dict:
